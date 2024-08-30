@@ -9,6 +9,43 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_val_predict
 import os
+import warnings
+
+warnings.filterwarnings("ignore")
+
+# Define the feature selection problem
+class FeatureSelectionProblem:
+    def __init__(self, X, y, clf):
+        self.X = X
+        self.y = y
+        self.clf = clf
+
+    def evaluate(self, individual):
+        # Select the features
+        selected_features = [index for index in range(len(individual)) if individual[index] == 1]
+        if len(selected_features) == 0:
+            return 0
+        
+        X_selected = self.X.iloc[:, selected_features]
+        # Train and evaluate the classifier
+        X_train, X_test, y_train, y_test = train_test_split(X_selected, self.y, test_size=0.3, random_state=42)
+        
+        # Perform cross-validation to prevent data leakage
+        #y_pred = cross_val_predict(self.clf, X_selected, self.y, cv=5)
+        self.clf.fit(X_train, y_train)
+        y_pred = self.clf.predict(X_selected)
+
+        # Obj_1: Error rate
+        incorrect_predictions = sum(y_pred != self.y)  # Number of correct predictions
+        error_rate = 1 - incorrect_predictions / len(self.y)  # Error rate
+        
+        # Obj_2: Feature selected ratio
+        FS_rate = len(selected_features) / self.X.shape[1]  # Feature selected ratio
+
+        #accuracy = accuracy_score(self.y, y_pred)
+        # Calculate the number of selected features
+        #num_features = np.sum(x)
+        return round(error_rate,4), FS_rate
 
 def read_file(files_name):
     # Read file and extract data file
@@ -69,10 +106,232 @@ def Wrapper_Fs(Feature, Target, seed_):
     selected_features = Feature.columns[rfecv.support_]  # Names of selected features
     return selected_features
 
+def get_rank(individual, fronts):
+    for rank, front in enumerate(fronts):
+        if individual in front:
+            return rank
+    return None
+
+def get_crowding_distance(individual_idx, crowding_distances):
+    """
+    Get the crowding distance for a particular individual index.
+    
+    Parameters:
+    individual_idx: The index of the individual whose crowding distance is to be found.
+    crowding_distances: List of tuples where each tuple contains (index, crowding distance).
+    
+    Returns:
+    The crowding distance of the individual, or None if the individual is not found.
+    """
+    for idx, distance in crowding_distances:
+        if idx == individual_idx:
+            return distance
+    return None
+
+def binary_tournament_selection(population, fronts, crowding_distances, k=2):
+    winner = []
+    for _ in range(k):
+        # Select two individuals randomly
+        #selected_idx = random.sample(population, k)
+        selected_idx  = random.sample(range(len(population)), k)
+        
+        # Get the rank of the selected individuals
+        parent1_rank = get_rank(selected_idx[0], fronts)
+        parent2_rank = get_rank(selected_idx[1], fronts)
+        # Compare ranks of the selected individuals
+        if parent1_rank < parent2_rank:
+            winner.append(selected_idx[0])
+        elif parent1_rank > parent2_rank:
+            winner.append(selected_idx[1])
+
+        elif parent1_rank == parent2_rank: # if the ranks are the same for two selection individuals
+            if crowding_distances[selected_idx[0]] > crowding_distances[selected_idx[1]]:
+                winner.append(selected_idx[0])
+            else:
+                winner.append(selected_idx[1])
+    
+    return winner[0], winner[1]
+
+def genetic_operation(population, fronts, crowding_distances, model, pop_size, num_generations, crossover_prob, mutation_prob):
+
+    offspring = []
+    while len(offspring) < pop_size:
+        # Select two parents using tournament selection
+        parent1, parent2 = binary_tournament_selection(population, fronts, crowding_distances, 2)
+        parent1 = population[parent1]
+        parent2 = population[parent2] 
+        # Crossover
+        if random.random() < crossover_prob:
+            child1, child2 = crossover(parent1, parent2)
+        else:
+            child1, child2 = parent1, parent2
+        # Mutation
+        if random.random() < mutation_prob:
+            child1 = mutate(child1)
+        if random.random() < mutation_prob:
+            child2 = mutate(child2)
+        offspring.extend([child1, child2])
+
+    # Evaluate the offspring
+    offspring_fitnesses = [model.evaluate(ind) for ind in offspring]
+    #for ind, fit in zip(offspring, fitnesses):
+    #    ind.fitness = fit
+
+    # Non-dominated sorting and crowding distance calculation for Offspring
+    offspring_fronts = non_dominated_sort(offspring, offspring_fitnesses)
+    #offspring_crowding_distances = calculate_crowding_distance(offspring_fronts, offspring_fitnesses)
+    #population = population[:pop_size]
+
+    return offspring, offspring_fitnesses, offspring_fronts
+
+def crossover(parent1, parent2):
+    crossover_point = random.randint(1, len(parent1) - 1)
+    child1 = np.concatenate((parent1[:crossover_point], parent2[crossover_point:]))
+    child2 = np.concatenate((parent2[:crossover_point], parent1[crossover_point:]))
+    return child1, child2
+
+def mutate(individual):
+    mutation_point = random.randint(0, len(individual) - 1)
+    individual[mutation_point] = 1 - individual[mutation_point]
+    return individual
+
+
+def calculate_crowding_distance(fronts, fitnesses):
+    """
+    Calculate the crowding distance for each individual in the fronts.
+    
+    Parameters:
+    fronts: List of fronts where each front is a list of individual indices.
+    fitnesses: List of fitness values where each index corresponds to the index of the individual in the population.
+    
+    Returns:
+    Dictionary of crowding distances where the key is the individual's index.
+    """
+    num_solutions = len(fitnesses)
+    num_objectives = len(fitnesses[0])
+
+    # Initialize crowding distances
+    crowding_distances = np.zeros(num_solutions)
+
+    # Calculate crowding distances for each front
+    for front in fronts:
+        if len(front) == 0:
+            continue
+        
+        for k in range(num_objectives):
+            # Sort the front by the objective k values
+            sorted_front = sorted(front, key=lambda x: fitnesses[x][k])
+            min_value = fitnesses[sorted_front[0]][k]
+            max_value = fitnesses[sorted_front[-1]][k]
+
+            # Assign infinite distance to boundary solutions
+            crowding_distances[sorted_front[0]] = float('inf')
+            crowding_distances[sorted_front[-1]] = float('inf')
+
+            # Calculate the crowding distance for each interior solution
+            if max_value != min_value:  # Avoid division by zero
+                for j in range(1, len(sorted_front) - 1):
+                    crowding_distances[sorted_front[j]] += (
+                        (fitnesses[sorted_front[j + 1]][k] - fitnesses[sorted_front[j - 1]][k]) /
+                        (max_value - min_value)
+                    )
+    
+    return crowding_distances
+
+def non_dominated_sort(population, fitnesses):
+        """
+    Perform non-dominated sorting on the population.
+    
+    Parameters:
+    population: List of individuals.
+    fitnesses: List of fitness values where each index corresponds to the index of the individual in the population.
+    
+    Returns:
+    List of fronts, where each front is a list of individuals.
+    """
+        fronts = []
+        front = []
+        
+        domination_count = {i: 0 for i in range(len(population))}
+        dominated_solutions = {i: [] for i in range(len(population))}
+        
+        for i, ind in enumerate(population):
+            for j, other in enumerate(population):
+                if i != j:
+                    if dominates(fitnesses[i], fitnesses[j]):
+                        dominated_solutions[i].append(j)
+                    elif dominates(fitnesses[j], fitnesses[i]):
+                        domination_count[i] += 1
+            
+            if domination_count[i] == 0:
+                front.append(i)
+        
+        fronts.append(front)
+        i = 0
+        
+        while len(fronts[i]) > 0:
+            next_front = []
+            for ind in fronts[i]:
+                for other in dominated_solutions[ind]:
+                    domination_count[other] -= 1
+                    if domination_count[other] == 0:
+                        next_front.append(other)
+            i += 1
+            fronts.append(next_front)
+        
+        # Remove the last empty front
+        if not fronts[-1]:
+            fronts.pop()
+        
+        # Store the sorted individuals in a separate variable
+        sorted_individuals = [population[ind] for front in fronts for ind in front]
+        
+        return fronts
+
+def dominates(fitness1, fitness2):
+    """
+    Check if fitness1 dominates fitness2 based on two objectives.
+    
+    Parameters:
+    fitness1: List of fitness values for the first individual.
+    fitness2: List of fitness values for the second individual.
+    
+    Returns:
+    True if fitness1 dominates fitness2, False otherwise.
+    """
+    return all(x <= y for x, y in zip(fitness1, fitness2)) and any(x < y for x, y in zip(fitness1, fitness2))
+
+def select_next_generation(new_population, new_population_fronts, new_population_crowding_distances, population_size):
+    """
+    Prepare the population for the next generation.
+    
+    Parameters:
+    new_population: List of individuals in the new population.
+    new_population_fronts: List of fronts where each front is a list of individual indices.
+    new_population_crowding_distances: List of tuples where each tuple contains (index, crowding distance).
+    population_size: Desired size of the next generation population.
+    
+    Returns:
+    List of individuals selected for the next generation.
+    """
+    next_generation = []
+    crowding_distance_dict = {idx: dist for idx, dist in enumerate(new_population_crowding_distances)}
+    
+    for front in new_population_fronts:
+        if len(next_generation) + len(front) > population_size:
+            # Sort the front by crowding distance in descending order
+            front.sort(key=lambda idx: crowding_distance_dict[idx], reverse=True)
+            next_generation.extend(front[:population_size - len(next_generation)])
+            break
+        else:
+            next_generation.extend(front)
+    
+    return [new_population[idx] for idx in next_generation]
+
 def main():
     # Setttings for the algorithm
-    population_size = 100
-    num_generations = 10
+    population_size = 50
+    num_generations = 2
     crossover_prob = 0.5
     mutation_prob = 0.1
     runs = 3
@@ -84,15 +343,51 @@ def main():
     for i, datafile_ in enumerate(file_name):
 
         # Read dataset and columns from file 
-        dataset = read_file(datafile_, columns_file[i])
+        dataset = read_file([datafile_, columns_file[i]])
         Feature = dataset.iloc[:, :-1]  # Features
         Target = dataset.iloc[:, -1]    # Target: 0 (MUSK) or 1 (NON-MSK)
 
         for run in range(runs):
+            print(f' Run {run+1} of {runs} in progress, dataset {datafile_}')
             # Feature selection, then data transformation
             feature_selected = Wrapper_Fs(Feature, Target, seed_[run])
             datset_fs = Feature[feature_selected]
 
             # initialize popoulation
             fs_population = initialize_population(population_size, datset_fs.shape[1], seed_[run])
-            
+
+            for gen in range(num_generations):
+                print('Generation: ', gen)
+                # Initialize the problem
+                model = FeatureSelectionProblem(datset_fs, Target, RandomForestClassifier(n_estimators=50))
+                
+                # FITNESS FUNCTION: Evaluate the fitness of each individual in the population
+                fitnesses = [model.evaluate(ind) for ind in fs_population]
+                #for ind, fit in zip(fs_population, fitnesses):
+                #    ind.fitness = fit
+                
+                # NON-DOMINANCE SORTING: Calculate the Non-dominance fronts
+                fronts = non_dominated_sort(fs_population, fitnesses)
+                
+                # CROWDING DISTANCE: Calculate the crowding distance of each individual in each front
+                crowding_distances = calculate_crowding_distance(fronts, fitnesses)
+
+                # GENETIC OPERATION: Perform the genetic operation
+                offspring, offspring_fitnesses, offspring_fronts = genetic_operation(fs_population, fronts, crowding_distances, model, 
+                                                                                     population_size, num_generations, crossover_prob, mutation_prob)
+                # combine the population and offspring into a single population
+                new_population = fs_population + offspring
+                new_population_fitnesses = fitnesses + offspring_fitnesses
+
+                # Combine the fronts of the population and offspring
+                new_population_fronts = non_dominated_sort(new_population, new_population_fitnesses)
+                
+                # Calculate the crowding distance of the new population
+                new_population_crowding_distances = calculate_crowding_distance(new_population_fronts, new_population_fitnesses)
+                
+                # Select the next generation
+                next_generation_populations = select_next_generation(new_population, new_population_fronts, new_population_crowding_distances, population_size)
+                fs_population = next_generation_populations
+
+if __name__ == '__main__':
+    main()
