@@ -1,8 +1,13 @@
 import numpy as np
+import pandas as pd
 import random
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
-import pandas as pd
+from sklearn.feature_selection import RFECV
+from sklearn.model_selection import StratifiedKFold
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import cross_val_predict
 import os
 
 def read_file(files_name):
@@ -42,7 +47,37 @@ def read_file(files_name):
 
     return dataset
 
+def initialize_population(pop_size, num_features, seed_):
+    random.seed(seed_)
+    return [[random.randint(0, 1) for _ in range(num_features)] for _ in range(pop_size)]
+
+def Wrapper_Fs(Feature, Target, seed_):
+    random.seed(seed_)
+    clf = LogisticRegression(random_state=seed_)
+    cv = StratifiedKFold(5)
+
+    rfecv = RFECV(
+        estimator=clf,
+        step=1,
+        cv=cv,
+        scoring="accuracy",
+        #min_features_to_select=min_features_to_select,
+        n_jobs=2,
+    )
+    rfecv.fit(Feature, Target)
+    #predictions = rfecv.predict(Feature)  # Predictions of the best subset of features
+    selected_features = Feature.columns[rfecv.support_]  # Names of selected features
+    return selected_features
+
 def main():
+    # Setttings for the algorithm
+    population_size = 100
+    num_generations = 10
+    crossover_prob = 0.5
+    mutation_prob = 0.1
+    runs = 3
+    seed_ = [20, 30, 40, 50, 60]
+
     file_name = ['clean1.data']
     columns_file = ['clean1.names']
 
@@ -53,3 +88,10 @@ def main():
         Feature = dataset.iloc[:, :-1]  # Features
         Target = dataset.iloc[:, -1]    # Target: 0 (MUSK) or 1 (NON-MSK)
 
+        for run in range(runs):
+            # Feature selection, then data transformation
+            feature_selected = Wrapper_Fs(Feature, Target, seed_[run])
+            datset_fs = Feature[feature_selected]
+
+            # initialize popoulation
+            fs_population = initialize_population(population_size, datset_fs.shape[1], seed_[run])
