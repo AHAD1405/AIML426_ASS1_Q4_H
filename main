@@ -455,6 +455,9 @@ def main():
 
     for i, datafile_ in enumerate(file_name):
         hyper_volumes = []
+        # parameters for classifier using the entire dataset features
+        classified_all_features = False # Check if the entire dataset features are classified
+        all_features_fitnesses = [] # Store the fitness of the entire dataset features
 
         # Read dataset and columns from file 
         dataset = read_file([datafile_, columns_file[0]])
@@ -524,11 +527,16 @@ def main():
             print('Pareto individuals fitness: ', pareto_individual_fitness)
 
             # ----------------- CLASSIFY THE ENTIRE DATASET FEATURES -------------------
-            # dataset for entire features
-            all_features_model = FeatureSelectionProblem(Feature, Target, RandomForestClassifier(n_estimators=50))
-            all_features_population = [[1 for _ in range(Feature.shape[1])] for _ in range(1)]
-            all_features_fitnesses = [all_features_model.evaluate(ind) for ind in all_features_population]
-            print('Error rate using the entire dataset features: ', all_features_fitnesses[0][0])
+            if classified_all_features == False:
+                all_features_fitnesses = []
+                all_features_model = FeatureSelectionProblem(Feature, Target, RandomForestClassifier(n_estimators=50))
+                all_features_population = [[1 for _ in range(Feature.shape[1])] for _ in range(1)]
+                all_features_fitnesses = [all_features_model.evaluate(ind) for ind in all_features_population]
+                print('Error rate using the entire dataset features: ', all_features_fitnesses[0][0])
+                classified_all_features = True
+
+            elif classified_all_features == True:
+                print('Error rate using the entire dataset features: ', all_features_fitnesses[0][0])
 
             # ---------------- HYPER-VOLUME --------------------
             # Calculate the hyper-volume of the final front
