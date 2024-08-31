@@ -10,6 +10,9 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_val_predict
 import os
 import warnings
+from pymoo.indicators.hv import HV
+from sklearn.preprocessing import MinMaxScaler
+import matplotlib.pyplot as plt
 
 warnings.filterwarnings("ignore")
 
@@ -319,15 +322,68 @@ def select_next_generation(new_population, new_population_fronts, new_population
     
     for front in new_population_fronts:
         if len(next_generation) + len(front) > population_size:
+            if len(next_generation) == population_size: # If the population is already full
+                break
             # Sort the front by crowding distance in descending order
             front.sort(key=lambda idx: crowding_distance_dict[idx], reverse=True)
-            next_generation.append([front[:population_size - len(next_generation)]])
+            [next_generation.append(new_population[ind]) for ind in front[:population_size - len(next_generation)]]
             break
         else:
             # Add all individual of front to new_population
             [next_generation.append(new_population[ind]) for ind in front]
     
     return next_generation
+
+def hyper_volume_clac(pareto_individuals, pareto_individual_fitness):
+    """
+    Calculate the hyper-volume of the Pareto front.
+    
+    Parameters:
+    pareto_individuals: List of individuals in the Pareto front.
+    pareto_individual_fitness: List of fitness values for the Pareto front individuals.
+    
+    Returns:
+    float: The hyper-volume of the Pareto front.
+    """
+    # Convert fitness values to a numpy array
+    #pareto_individual_fitness = np.array(pareto_individual_fitness)
+    
+    # Normalize the fitness values
+    scaler = MinMaxScaler()
+    pareto_individual_fitness_normalized = scaler.fit_transform(pareto_individual_fitness)
+
+    # Define the reference point (this should be chosen based on the problem context)
+    reference_point = [1.1] * len(pareto_individual_fitness[0])
+    #reference_point = np.max(pareto_individual_fitness_normalized, axis=0)
+    
+    # Compute the hyper-volume
+    hv = HV(ref_point=reference_point)
+    hyper_volume = hv.do(pareto_individual_fitness_normalized)
+    
+    return hyper_volume
+
+def plot_pareto_front(pareto_individual_fitness, dataset_name, run_no):
+    """
+    Plot the Pareto front fitness values.
+    
+    Parameters:
+    pareto_individuals: List of individuals in the Pareto front.
+    pareto_individual_fitness: List of fitness values for the Pareto front individuals.
+    dataset_name: Name of the dataset.
+    run_no: Run number.
+    """
+    pareto_individual_fitness = np.array(pareto_individual_fitness)
+    
+    # Create a scatter plot
+    plt.scatter(pareto_individual_fitness[:, 0], pareto_individual_fitness[:, 1], color='b', marker='o')
+    plt.title(f'Pareto Front Fitness Values for {dataset_name} (Run {run_no})')
+    plt.xlabel('Objective 1: Error Rate')
+    plt.ylabel('Objective 2: Feature Selected Ratio')
+    plt.grid(True)
+    
+    # Save the plot as an image file
+    #plt.savefig(f'pareto_front_{dataset_name}_run_{run_no}.png')
+    plt.close()
 
 def main():
     # Setttings for the algorithm
@@ -342,6 +398,7 @@ def main():
     columns_file = ['clean1.names']
 
     for i, datafile_ in enumerate(file_name):
+        hyper_volumes = []
 
         # Read dataset and columns from file 
         dataset = read_file([datafile_, columns_file[i]])
@@ -399,15 +456,21 @@ def main():
             final_crowding_distances = calculate_crowding_distance(final_fronts, final_fitnesses)
             
             # Select pareto individual from the final front
-            pareto_individuals = fs_population[final_fronts[0]]
-            pareto_individual_fitness = final_fitnesses[final_fronts[0]]
+            pareto_individuals = [fs_population[idx] for idx in final_fronts[0]]
+            pareto_individual_fitness = [final_fitnesses[fitness] for fitness in final_fronts[0]]
             print('Pareto individuals number: ', final_fronts[0])
             print('Pareto individuals fitness: ', pareto_individual_fitness)
 
             # ---------------- HYPER-VOLUME --------------------
             # Calculate the hyper-volume of the final front
-            #hyper_volume = calculate_hyper_volume(pareto_individuals, pareto_individual_fitness)
-            #print('Hyper-volume: ', hyper_volume)
+            hv = hyper_volume_clac(pareto_individuals, pareto_individual_fitness)
+            hyper_volumes.append(hv)  # Store the hyper-volume for each run
+            print('Hyper-volume: ', round(hv, 4))
+
+            # ----------------- PLOT THE RESULTS -------------------
+            # Plot the Pareto front
+            plot_pareto_front(pareto_individual_fitness, datafile_, run)
+
 
 if __name__ == '__main__':
     main()
