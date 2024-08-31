@@ -321,12 +321,13 @@ def select_next_generation(new_population, new_population_fronts, new_population
         if len(next_generation) + len(front) > population_size:
             # Sort the front by crowding distance in descending order
             front.sort(key=lambda idx: crowding_distance_dict[idx], reverse=True)
-            next_generation.extend(front[:population_size - len(next_generation)])
+            next_generation.append([front[:population_size - len(next_generation)]])
             break
         else:
-            next_generation.extend(front)
+            # Add all individual of front to new_population
+            [next_generation.append(new_population[ind]) for ind in front]
     
-    return [new_population[idx] for idx in next_generation]
+    return next_generation
 
 def main():
     # Setttings for the algorithm
@@ -372,22 +373,41 @@ def main():
                 # CROWDING DISTANCE: Calculate the crowding distance of each individual in each front
                 crowding_distances = calculate_crowding_distance(fronts, fitnesses)
 
-                # GENETIC OPERATION: Perform the genetic operation
+                # ---------GENETIC OPERATION: ------------------------
+                # Perform the genetic operation
                 offspring, offspring_fitnesses, offspring_fronts = genetic_operation(fs_population, fronts, crowding_distances, model, 
                                                                                      population_size, num_generations, crossover_prob, mutation_prob)
+                # -------- COMBINE POPULATIONS -------------------------
                 # combine the population and offspring into a single population
-                new_population = fs_population + offspring
-                new_population_fitnesses = fitnesses + offspring_fitnesses
+                comb_pop = fs_population + offspring
+                comb_pop_fitnesses = [model.evaluate(ind) for ind in comb_pop]
 
                 # Combine the fronts of the population and offspring
-                new_population_fronts = non_dominated_sort(new_population, new_population_fitnesses)
+                comb_pop_fronts = non_dominated_sort(comb_pop, comb_pop_fitnesses)
                 
                 # Calculate the crowding distance of the new population
-                new_population_crowding_distances = calculate_crowding_distance(new_population_fronts, new_population_fitnesses)
+                comb_pop_crowding_distances = calculate_crowding_distance(comb_pop_fronts, comb_pop_fitnesses)
                 
                 # Select the next generation
-                next_generation_populations = select_next_generation(new_population, new_population_fronts, new_population_crowding_distances, population_size)
+                next_generation_populations = select_next_generation(comb_pop, comb_pop_fronts, comb_pop_crowding_distances, population_size)
                 fs_population = next_generation_populations
+            
+            # ------------ CALCULATE THE FINAL FRONT -------------------
+            # Calculate non-dominante sorting, fitnes fucntion, crowding distance for the final population for current run
+            final_fitnesses = [model.evaluate(ind) for ind in fs_population]
+            final_fronts = non_dominated_sort(fs_population, final_fitnesses)
+            final_crowding_distances = calculate_crowding_distance(final_fronts, final_fitnesses)
+            
+            # Select pareto individual from the final front
+            pareto_individuals = fs_population[final_fronts[0]]
+            pareto_individual_fitness = final_fitnesses[final_fronts[0]]
+            print('Pareto individuals number: ', final_fronts[0])
+            print('Pareto individuals fitness: ', pareto_individual_fitness)
+
+            # ---------------- HYPER-VOLUME --------------------
+            # Calculate the hyper-volume of the final front
+            #hyper_volume = calculate_hyper_volume(pareto_individuals, pareto_individual_fitness)
+            #print('Hyper-volume: ', hyper_volume)
 
 if __name__ == '__main__':
     main()
