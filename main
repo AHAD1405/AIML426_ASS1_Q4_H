@@ -62,32 +62,55 @@ def read_file(files_name):
     data_file = os.path.join(script_directory,files_name[0]) 
     columns_file = os.path.join(script_directory, files_name[1]) # wbcd.names , sonar.names
 
-    columns_name = []
+    # -------- Datase: (vehicle) ----------------------------------
+    if files_name[0] == 'vehicle.dat': # If the file name is empty
+        column_names = ['COMPACTNESS', 'CIRCULARITY', 'DISTANCE CIRCULARITY', 'RADIUS RATIO', 'PR.AXIS ASPECT RATIO', 
+                        'MAX.LENGTH ASPECT RATIO', 'SCATTER RATIO', 'ELONGATEDNESS', 'PR.AXIS RECTANGULARITY', 'MAX.LENGTH RECTANGULARITY', 
+                        'SCALED VARIANCE ALONG MAJOR AXIS','SCALED VARIANCE ALONG MINOR AXIS', 'SCALED RADIUS OF GYRATION', 'SKEWNESS ABOUT MAJOR AXIS', 
+                        'SKEWNESS ABOUT MINOR AXIS', 'KURTOSIS ABOUT MINOR AXIS', 'KURTOSIS ABOUT MAJOR AXIS', 'HOLLOWS RATIO', 'class_']
+        
+        # reading dataset from file
+        with open(data_file,'r') as data_:
+            data = data_.readlines()
+            dataset = pd.DataFrame(columns=column_names)
+            for line in data:
+                x = line.split()
+                dataset.loc[len(dataset)] = x
+            
+            # Binary target column: , 0: opel, 1: saab, 2: van, 3: bus
+            dataset['class'] = [0 if row == 'opel' else 1 if row == 'saab' else 2 if row == 'van' else 3 for row in dataset['class_']]
+            
+            dataset = dataset.drop(columns=['class_'])
+        return dataset
+    
+    # -------- Datase: (clean1.data) ----------------------------------
+    if files_name[0] == 'clean1.data': # If the file name is empty
+        # reading dataset from file
+        columns_name = []
+        # Reading Column names from file
+        with open(columns_file,'r') as file_: 
+            columns = file_.readlines()
+            for idx, line in enumerate(columns): # extract values
+                if idx == 0: 
+                    columns_name.append('target_')   # add column for target column
+                    continue
+                x = line.split()
+                columns_name.append(x[0])
+                #column_data.append(x[1])
 
-    # Reading Column names from file
-    with open(columns_file,'r') as file_: 
-        columns = file_.readlines()
-        for idx, line in enumerate(columns): # extract values
-            if idx == 0: 
-                columns_name.append('target_')   # add column for target column
-                continue
-            x = line.split()
-            columns_name.append(x[0])
-            #column_data.append(x[1])
+        # Reading dataset from file
+        with open(data_file,'r') as data_: 
+            data = data_.readlines()
+            dataset = pd.DataFrame(columns=columns_name)
+            for line in data:
+                x = line.split(',')
+                dataset.loc[len(dataset)] = x
 
-    # Reading dataset from file
-    with open(data_file,'r') as data_: 
-        data = data_.readlines()
-        dataset = pd.DataFrame(columns=columns_name)
-        for line in data:
-            x = line.split(',')
-            dataset.loc[len(dataset)] = x
+        # Bnary target column: 0: MUSK, 1: NON-MUSK
+        dataset['class'] = [0 if row[0:4] == 'MUSK' else 1 for row in dataset['target_'].str.strip()]
 
-    # Bnary target column: 0: MUSK, 1: NON-MUSK
-    dataset['class'] = [0 if row[0:4] == 'MUSK' else 1 for row in dataset['target_'].str.strip()]
-
-    # Apply EDAs 
-    dataset = dataset.drop(columns=['molecule_name:', 'conformation_name:', 'f166:','target_'])  # Drop unrelivant columns
+        # Apply EDAs 
+        dataset = dataset.drop(columns=['molecule_name:', 'conformation_name:', 'f166:','target_'])  # Drop unrelivant columns
                     
 
     return dataset
@@ -206,7 +229,6 @@ def mutate(individual):
     mutation_point = random.randint(0, len(individual) - 1)
     individual[mutation_point] = 1 - individual[mutation_point]
     return individual
-
 
 def calculate_crowding_distance(fronts, fitnesses):
     """
@@ -422,22 +444,28 @@ def print_summary(hv, mean_, std_):
 def main():
     # Setttings for the algorithm
     population_size = 50
-    num_generations = 2
+    num_generations = 5
     crossover_prob = 0.5
     mutation_prob = 0.1
     runs = 3
     seed_ = [20, 30, 40, 50, 60]
 
-    file_name = ['clean1.data']
+    file_name = ['vehicle.dat','clean1.data']
     columns_file = ['clean1.names']
 
     for i, datafile_ in enumerate(file_name):
         hyper_volumes = []
 
         # Read dataset and columns from file 
-        dataset = read_file([datafile_, columns_file[i]])
+        dataset = read_file([datafile_, columns_file[0]])
         Feature = dataset.iloc[:, :-1]  # Features
-        Target = dataset.iloc[:, -1]    # Target: 0 (MUSK) or 1 (NON-MSK)
+        
+        """
+        Binary target column:
+                for (vehicle) dataset 0: opel, 1: saab, 2: van, 3: bus
+                for (clean1) dataset 0: MUSK, 1: NON-MUSK 
+        """
+        Target = dataset.iloc[:, -1]
 
         for run in range(runs):
             print(f' Run {run+1} of {runs} in progress, dataset {datafile_}')
@@ -481,8 +509,7 @@ def main():
                 
                 # Select the next generation
                 next_generation_populations = select_next_generation(comb_pop, comb_pop_fronts, comb_pop_crowding_distances, population_size)
-                fs_population = next_generation_populations
-                print('------------------------------------------------')
+                fs_population = next_generation_populations                
             
             # ------------ CALCULATE THE FINAL FRONT -------------------
             # Calculate non-dominante sorting, fitnes fucntion, crowding distance for the final population for current run
@@ -505,6 +532,7 @@ def main():
             # ----------------- PLOT THE RESULTS -------------------
             # Plot the Pareto front
             plot_pareto_front(pareto_individual_fitness, datafile_, run)
+            print('------------------------------------------------')
 
         # ---------------- SUMMARY RESULTS
         # Calculate the average hyper-volume across all runs
