@@ -27,7 +27,7 @@ class FeatureSelectionProblem:
         # Select the features
         selected_features = [index for index in range(len(individual)) if individual[index] == 1]
         if len(selected_features) == 0:
-            return 0
+            return 0.0, 0.0
         
         X_selected = self.X.iloc[:, selected_features]
         
