@@ -30,13 +30,18 @@ class FeatureSelectionProblem:
             return 0
         
         X_selected = self.X.iloc[:, selected_features]
+        
+        # Normalize the selected features
+        scaler = MinMaxScaler()
+        X_selected_normalized = scaler.fit_transform(X_selected)
+
         # Train and evaluate the classifier
-        X_train, X_test, y_train, y_test = train_test_split(X_selected, self.y, test_size=0.3, random_state=42)
+        X_train, X_test, y_train, y_test = train_test_split(X_selected_normalized, self.y, test_size=0.3, random_state=42)
         
         # Perform cross-validation to prevent data leakage
         #y_pred = cross_val_predict(self.clf, X_selected, self.y, cv=5)
         self.clf.fit(X_train, y_train)
-        y_pred = self.clf.predict(X_selected)
+        y_pred = self.clf.predict(X_selected_normalized)
 
         # Obj_1: Error rate
         incorrect_predictions = sum(y_pred != self.y)  # Number of correct predictions
@@ -48,7 +53,7 @@ class FeatureSelectionProblem:
         #accuracy = accuracy_score(self.y, y_pred)
         # Calculate the number of selected features
         #num_features = np.sum(x)
-        return round(error_rate,4), FS_rate
+        return round(error_rate,4), round(FS_rate, 4)
 
 def read_file(files_name):
     # Read file and extract data file
@@ -93,8 +98,12 @@ def initialize_population(pop_size, num_features, seed_):
 
 def Wrapper_Fs(Feature, Target, seed_):
     random.seed(seed_)
-    clf = LogisticRegression(random_state=seed_)
+    clf = LogisticRegression(random_state=seed_, max_iter=1000)
     cv = StratifiedKFold(5)
+
+    # Normalize the features
+    scaler = MinMaxScaler()
+    Feature_normalized = scaler.fit_transform(Feature)
 
     rfecv = RFECV(
         estimator=clf,
@@ -104,7 +113,7 @@ def Wrapper_Fs(Feature, Target, seed_):
         #min_features_to_select=min_features_to_select,
         n_jobs=2,
     )
-    rfecv.fit(Feature, Target)
+    rfecv.fit(Feature_normalized, Target)
     #predictions = rfecv.predict(Feature)  # Predictions of the best subset of features
     selected_features = Feature.columns[rfecv.support_]  # Names of selected features
     return selected_features
@@ -379,11 +388,36 @@ def plot_pareto_front(pareto_individual_fitness, dataset_name, run_no):
     plt.title(f'Pareto Front Fitness Values for {dataset_name} (Run {run_no})')
     plt.xlabel('Objective 1: Error Rate')
     plt.ylabel('Objective 2: Feature Selected Ratio')
-    plt.grid(True)
     
+    plt.grid(True)
+    plt.show()
+    plt.close()
     # Save the plot as an image file
     #plt.savefig(f'pareto_front_{dataset_name}_run_{run_no}.png')
-    plt.close()
+    
+
+def print_summary(hv, mean_, std_):
+    """
+        Creates a pandas DataFrame table with the given data.
+    """
+    # First column
+    first_column = ['Run 1','Run 2','Run 3']
+
+    # Create a dictionary with the two lists as values
+    data = {'': first_column, 'Hyper-volume': hv}
+
+    # Create a pandas DataFrame from the dictionary
+    data_table = pd.DataFrame(data)
+
+    # Create a new DataFrame with the mean and concatenate it with (data_table)
+    mean_row = pd.DataFrame({'': ['Mean'], 'Hyper-volume': [mean_]})
+    data_table = pd.concat([data_table, mean_row], ignore_index=True)
+
+    # Create a new DataFrame with the stander deviation and concatenate it with (data_table)
+    std_row = pd.DataFrame({'': ['STD'], 'Hyper-volume': [std_] })
+    data_table = pd.concat([data_table, std_row], ignore_index=True)
+
+    return data_table
 
 def main():
     # Setttings for the algorithm
@@ -448,6 +482,7 @@ def main():
                 # Select the next generation
                 next_generation_populations = select_next_generation(comb_pop, comb_pop_fronts, comb_pop_crowding_distances, population_size)
                 fs_population = next_generation_populations
+                print('------------------------------------------------')
             
             # ------------ CALCULATE THE FINAL FRONT -------------------
             # Calculate non-dominante sorting, fitnes fucntion, crowding distance for the final population for current run
@@ -470,6 +505,16 @@ def main():
             # ----------------- PLOT THE RESULTS -------------------
             # Plot the Pareto front
             plot_pareto_front(pareto_individual_fitness, datafile_, run)
+
+        # ---------------- SUMMARY RESULTS
+        # Calculate the average hyper-volume across all runs
+        avg_hv = np.mean(hyper_volumes)
+        std_hv = np.std(hyper_volumes)
+        
+        # Print the summary of hyper-volumes
+        summary = print_summary(hyper_volumes, round(avg_hv, 4), round(std_hv, 4))
+        print(summary)
+
 
 
 if __name__ == '__main__':
